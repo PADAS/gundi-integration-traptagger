@@ -3,6 +3,8 @@ from urllib.parse import urlparse
 import httpx
 
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+# TrapTagger's answer, lowercased, to a request with an accepted key and no image.
+KEY_ACCEPTED_MESSAGE = "no image provided"
 
 
 def add_image_url(base_url: str) -> str:
@@ -13,7 +15,10 @@ def add_image_url(base_url: str) -> str:
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError(f"'{base_url}' isn't a full web address")
-    host = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
+    # hostname drops the brackets from IPv6 literals; put them back.
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
     return f"{parsed.scheme}://{host}/api/v1/addImage"
 
 

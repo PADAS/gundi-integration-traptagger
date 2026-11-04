@@ -27,7 +27,7 @@ async def action_auth(integration, action_config: AuthenticateConfig):
     if response.status_code in (401, 403):
         return {"valid_credentials": False,
                 "message": "TrapTagger didn't accept the API key. Check that it's current and try again."}
-    if response.status_code == 400:
+    if response.status_code == 400 and traptagger.KEY_ACCEPTED_MESSAGE in response.text.lower():
         # TrapTagger answers 400 "No image provided." once the key is accepted.
         return {"valid_credentials": True}
     if response.status_code >= 500 or response.status_code == 429:

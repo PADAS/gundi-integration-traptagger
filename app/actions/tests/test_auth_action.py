@@ -41,6 +41,14 @@ def test_add_image_url_keeps_port():
     assert traptagger.add_image_url("https://host.test:8443/") == "https://host.test:8443/api/v1/addImage"
 
 
+@pytest.mark.parametrize("base_url, expected", [
+    ("https://[2001:db8::1]/", "https://[2001:db8::1]/api/v1/addImage"),
+    ("https://[2001:db8::1]:8443/x", "https://[2001:db8::1]:8443/api/v1/addImage"),
+])
+def test_add_image_url_keeps_ipv6_brackets(base_url, expected):
+    assert traptagger.add_image_url(base_url) == expected
+
+
 @pytest.mark.parametrize("base_url", ["traptagger.co.uk", "ftp://traptagger.co.uk", "https://"])
 def test_add_image_url_rejects_incomplete_address(base_url):
     with pytest.raises(ValueError):
@@ -76,6 +84,25 @@ async def test_network_error(mocker, integration, config):
     _mock_post(mocker, exc=httpx.ConnectTimeout("timed out"))
     result = await action_auth(integration, config)
     assert "couldn't be reached" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_unrelated_400_json_is_not_a_valid_key(mocker, integration, config):
+    _mock_post(mocker, 400, {"message": "Bad request."})
+    result = await action_auth(integration, config)
+    assert "valid_credentials" not in result
+    assert "HTTP 400" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_unrelated_400_html_is_not_a_valid_key(mocker, integration, config):
+    async def post(self, url, headers=None, **kwargs):
+        return httpx.Response(400, text="<html><h1>400 Bad Request</h1></html>", request=httpx.Request("POST", url))
+
+    mocker.patch("httpx.AsyncClient.post", new=post)
+    result = await action_auth(integration, config)
+    assert "valid_credentials" not in result
+    assert "HTTP 400" in result["error"]
 
 
 @pytest.mark.asyncio
