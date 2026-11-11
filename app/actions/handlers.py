@@ -238,7 +238,9 @@ async def _send_image(integration, image: gundi_schemas_v2.TrapTaggerImage, imag
     except Exception as e:
         logger.exception(f"Error downloading file '{file_path}' from cloud storage: {type(e).__name__}: {e}")
         raise
-    async with RateLimiterSemaphore(url=str(integration.base_url)):
+    # Count requests per upload endpoint, not per configured address, so
+    # "https://host", "https://host/" and "https://host/path" share one limit.
+    async with RateLimiterSemaphore(url=traptagger.add_image_url(str(integration.base_url))):
         result = await traptagger.add_image(
             base_url=str(integration.base_url),
             api_key=api_key,
