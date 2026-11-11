@@ -110,7 +110,11 @@ async def test_execute_push_action_from_pubsub(
     assert data == ObservationTransformedER.parse_obj(payload_dict)
     metadata = call_kwargs.get("metadata")
     assert isinstance(metadata, dict)
-    assert metadata == attributes
+    # The TrapTagger runner adds the Pub/Sub publish time to the attributes,
+    # for the push actions' 24-hour age check.
+    message = run_push_action_pubsub_payload["message"]
+    publish_time = message.get("publish_time") or message.get("publishTime")
+    assert metadata == {**attributes, "publish_time": publish_time}
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ import uuid
 from enum import Enum
 from typing import Optional
 
+import httpx
 import pydantic
 import stamina
 from gundi_core.schemas.v2 import Integration
@@ -311,6 +312,18 @@ async def _handle_error(
         except RuntimeError:
             return None
 
+    # A streamed body (a multipart file upload, for example) was never read
+    # into memory, and httpx raises RequestNotRead on .content. Leave it out
+    # rather than fail here: the activity log event would be lost and the
+    # caller would get a bare 500 instead of the error details.
+    def _request_body_of(r):
+        try:
+            return r.content
+        except httpx.RequestNotRead:
+            return None
+        except AttributeError:
+            return getattr(r, "body", None)
+
     # gundi-client-v2 3.x wraps a non-2xx Gundi response as GundiAPIError,
     # which carries neither, and chains httpx's error as the cause: read them
     # from there. Only for that type: an AuthenticationError's cause is the
@@ -328,7 +341,7 @@ async def _handle_error(
         error_details.update({
             "request_verb": str(request.method),
             "request_url": redact_url(str(request.url)),
-            "request_data": redact_body(getattr(request, "content", getattr(request, "body", None)))
+            "request_data": redact_body(_request_body_of(request))
         })
     if response is not None:
         error_details.update({

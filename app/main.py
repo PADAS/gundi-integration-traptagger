@@ -163,12 +163,17 @@ async def push_data(
             f"Attribute keys: {sorted(attributes.keys())}"
         )
         return {}
+    # TrapTagger: pass the Pub/Sub publish time on, so the push actions can
+    # dead-letter messages older than MAX_EVENT_AGE_SECONDS as the dispatcher did.
+    metadata = dict(attributes)
+    if publish_time := json_body["message"].get("publish_time") or json_body["message"].get("publishTime"):
+        metadata["publish_time"] = publish_time
     # Push data rides in the message itself, so execution errors must propagate
     # (non-2xx) for PubSub to redeliver — acking a failed run would drop data.
     return await execute_action(
         integration_id=destination_id,
         data=json_payload,
-        metadata=attributes
+        metadata=metadata
     )
 
 app.include_router(
