@@ -1,1 +1,3 @@
 # Add your integration-specific dependencies here
+# Downloads camera-trap images from the Gundi files bucket before sending them to TrapTagger
+gcloud-aio-storage~=9.2.0
