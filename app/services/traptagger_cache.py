@@ -27,14 +27,17 @@ class TooManyRequests(Exception):
     pass
 
 
-# Decrement the rate-limit counter only while it exists and is above zero.
-# One script, so the check and the decrement can't be split by another request.
-_RELEASE_SCRIPT = """
-local current = tonumber(redis.call('GET', KEYS[1]))
-if current and current > 0 then
-    return redis.call('DECR', KEYS[1])
+# Fixed-window rate limit: count every request in the window, and start the
+# window's expiry only when the window opens. Rejected requests still count,
+# but never push the expiry back, so the window always closes on time. A
+# counter left without an expiry (the dispatcher's DECR on an expired key can
+# do that while both share this Redis) gets one, so it can't block forever.
+_ACQUIRE_SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('TTL', KEYS[1]) == -1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
-return current or 0
+return count
 """
 
 
@@ -108,34 +111,19 @@ class RateLimiterSemaphore:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.release()
+        pass  # Requests count until their window closes; nothing to release.
 
-    async def acquire(self, auto_release=True):
+    async def acquire(self):
         """
-        Try to acquire the counter semaphore:
-            - Increase the number of requests made in the last time window
-            - If the number of requests is greater than the limit, raise an exception
+        Count this request in the current time window, and raise
+        TooManyRequests when the window already holds max_requests.
         """
-        async with self.redis_client.pipeline(transaction=True) as pipe:
-            operations = pipe.incr(self.url)
-            if auto_release:
-                operations = operations.expire(self.url, self.max_requests_time_window_sec)
-            res = await operations.execute()
-        logger.debug(f"RateLimiterSemaphore<{self.url}>: {res[0]}/{self.max_requests} requests")
-        if res[0] > self.max_requests:
+        count = await self.redis_client.eval(_ACQUIRE_SCRIPT, 1, self.url, self.max_requests_time_window_sec)
+        logger.debug(f"RateLimiterSemaphore<{self.url}>: {count}/{self.max_requests} requests")
+        if count > self.max_requests:
             raise TooManyRequests(
-                f"Too many requests in the last {self.max_requests_time_window_sec} seconds: {res[0]}"
+                f"Too many requests in the last {self.max_requests_time_window_sec} seconds: {count}"
             )
-
-    async def release(self):
-        """Decrease the number of requests made in the last time window.
-
-        The counter expires after the time window. An upload that ends later
-        must not decrement the missing key (DECR would create it at -1 with no
-        expiry, letting extra requests through), so the script only
-        decrements a counter that still exists and is above zero.
-        """
-        await self.redis_client.eval(_RELEASE_SCRIPT, 1, self.url)
 
     def __str__(self):
         return f"RateLimiterSemaphore<{self.url}>: {self.max_requests}/{self.max_requests_time_window_sec} sec"
